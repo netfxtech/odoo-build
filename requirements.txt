@@ -1,0 +1,16 @@
+pdfminer.six
+phonenumbers
+google_auth
+redis
+simplejson
+xlsxwriter
+xlrd
+fastapi
+python-multipart
+ujson
+a2wsgi
+parse-accept-language
+
+## Added ##
+python-Levenshtein
+fuzzywuzzy
