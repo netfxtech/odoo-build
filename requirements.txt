@@ -14,3 +14,4 @@ parse-accept-language
 ## Added ##
 python-Levenshtein
 fuzzywuzzy
+openai
