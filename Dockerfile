@@ -84,10 +84,10 @@ RUN git clone --depth 1 -b ${ODOO_VERSION} https://git.netfxtech.cloud/odoo/ente
 
 COPY ./requirements.txt /tmp/requirements.txt
 
-# RUN pip3 install --no-cache-dir -r /tmp/requirements.txt \
-#     && rm /tmp/requirements.txt
+# Enable pip to manage system site-packages without --break-system-packages.
+RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED /usr/lib/python*/dist-packages/EXTERNALLY-MANAGED
 
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --break-system-packages --no-dependencies \
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --no-dependencies \
     && rm /tmp/requirements.txt
 
 # Copy entrypoint script and Odoo configuration file
