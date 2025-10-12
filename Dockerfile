@@ -1,4 +1,4 @@
-FROM ubuntu:jammy
+FROM ubuntu:noble
 MAINTAINER Odoo S.A. <info@odoo.com>
 
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
@@ -10,7 +10,6 @@ ENV LANG en_US.UTF-8
 ARG TARGETARCH
 
 # Install some deps, lessc and less-plugin-clean-css, and wkhtmltopdf
-
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
@@ -23,6 +22,7 @@ RUN apt-get update && \
         libssl-dev \
         node-less \
         npm \
+        python3-lxml \
         python3-magic \
         python3-num2words \
         python3-odf \
@@ -38,8 +38,6 @@ RUN apt-get update && \
         python3-watchdog \
         python3-xlrd \
         python3-xlwt \
-        python3-xmlsec \
-        xmlsec1 \
         xz-utils && \
     if [ -z "${TARGETARCH}" ]; then \
         TARGETARCH="$(dpkg --print-architecture)"; \
@@ -56,7 +54,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* wkhtmltox.deb
 
 # install latest postgresql-client
-RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ jammy-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
+RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ noble-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
     && GNUPGHOME="$(mktemp -d)" \
     && export GNUPGHOME \
     && repokey='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' \
@@ -73,8 +71,8 @@ RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ jammy-pgdg main' > /etc/a
 RUN npm install -g rtlcss
 
 # Install Odoo
-ENV ODOO_VERSION 18.0
-ARG ODOO_RELEASE=20250912
+ENV ODOO_VERSION 19.0
+ARG ODOO_RELEASE=20250926
 RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/odoo_${ODOO_VERSION}.${ODOO_RELEASE}_all.deb \
     && apt-get update \
     && apt-get -y install --no-install-recommends ./odoo.deb \
@@ -86,7 +84,10 @@ RUN git clone --depth 1 -b ${ODOO_VERSION} https://git.netfxtech.cloud/odoo/ente
 
 COPY ./requirements.txt /tmp/requirements.txt
 
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt \
+# RUN pip3 install --no-cache-dir -r /tmp/requirements.txt \
+#     && rm /tmp/requirements.txt
+
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --break-system-packages --no-dependencies \
     && rm /tmp/requirements.txt
 
 # Copy entrypoint script and Odoo configuration file
@@ -108,8 +109,8 @@ ARG APP_GID
 ENV APP_GID ${APP_UID:-1000}
 
 
-RUN usermod -u ${APP_UID} ${ODOO_USER} \
-    && groupmod -g ${APP_GID} ${ODOO_USER}
+# RUN usermod -u ${APP_UID} ${ODOO_USER} \
+#     && groupmod -g ${APP_GID} ${ODOO_USER}
 
 # Expose Odoo services
 EXPOSE 8069 8071 8072
