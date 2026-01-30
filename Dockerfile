@@ -1,6 +1,3 @@
-# syntax=docker/dockerfile:1
-# check=skip=UndefinedVar # We set the variables as a reference
-
 ARG PYTHON_VERSION=3.12-slim
 ARG OS_VARIANT=bookworm
 ARG ODOO_VERSION
@@ -16,18 +13,13 @@ SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 USER root
 
-# Library versions
 ARG WKHTMLTOX_VERSION
 ENV WKHTMLTOX_VERSION=${WKHTMLTOX_VERSION}
 
-# Use noninteractive to get rid of apt-utils message
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install odoo deps
-# hadolint ignore=DL3008
 RUN apt-get -qq update \
     && apt-get -qq install -y --no-install-recommends \
-    # Odoo dependencies
     ca-certificates \
     curl \
     dirmngr \
@@ -36,8 +28,6 @@ RUN apt-get -qq update \
     libssl-dev \
     node-less \
     npm \
-    # This uses a buggy version of libmagic
-    # python3-magic \
     python3-num2words \
     python3-odf \
     python3-pdfminer \
@@ -52,7 +42,6 @@ RUN apt-get -qq update \
     python3-watchdog \
     python3-xlrd \
     python3-xlwt \
-    # Other dependencies
     git-core \
     htop \
     ffmpeg \
@@ -76,7 +65,6 @@ RUN apt-get -qq update \
     && apt-get autopurge -yqq \
     && rm -rf /var/lib/apt/lists/* wkhtmltox.deb /tmp/*
 
-# install latest postgresql-client
 RUN apt-get -qq update \
     && apt-get -qq install -y --no-install-recommends \
     lsb-release \
@@ -92,13 +80,11 @@ RUN apt-get -qq update \
     && rm -f /etc/apt/sources.list.d/pgdg.list \
     && rm -rf /var/lib/apt/lists/*
 
-# Install rtlcss (on Debian buster)
 RUN npm install -g rtlcss \
     && rm -Rf ~/.npm /tmp/*
 
 FROM base AS builder
 
-# Install hard & soft build dependencies
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     apt-utils dialog \
@@ -119,7 +105,6 @@ RUN apt-get update \
     libtiff5-dev \
     libxml2-dev \
     libxslt1-dev \
-    # Updated mimetype package to ensure consistent MIME type detection
     libmagic1 \
     libwebp-dev \
     tcl-dev \
@@ -127,7 +112,6 @@ RUN apt-get update \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Install Odoo source code and install it as a package inside the container with additional tools
 ARG ODOO_VERSION
 
 RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt \
@@ -164,16 +148,12 @@ RUN rm -rf /opt/odoo/.git /opt/odoo/enterprise/.git
 
 FROM base AS production
 
-# PIP auto-install requirements.txt (change value to "1" to auto-install)
 ENV PIP_AUTO_INSTALL=${PIP_AUTO_INSTALL:-"0"}
 
-# Run tests for all the modules in the custom addons
 ENV RUN_TESTS=${RUN_TESTS:-"0"}
 
-# Run tests for all installed modules
 ENV WITHOUT_TEST_TAGS=${WITHOUT_TEST_TAGS:-"0"}
 
-# Upgrade all databases visible to this Odoo instance
 ENV UPGRADE_ODOO=${UPGRADE_ODOO:-"0"}
 
 ARG ODOO_BASEPATH
@@ -194,8 +174,7 @@ RUN addgroup --system --gid ${APP_GID} ${ODOO_USER} \
     && echo ${ODOO_USER} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/${ODOO_USER}\
     && chmod 0440 /etc/sudoers.d/${ODOO_USER}
 
-    
-# Define all needed directories
+
 ENV ODOO_RC=${ODOO_RC:-/etc/odoo/odoo.conf}
 ENV ODOO_DATA_DIR=${ODOO_DATA_DIR:-/var/lib/odoo/data}
 ENV ODOO_LOGS_DIR=${ODOO_LOGS_DIR:-/var/lib/odoo/logs}
@@ -205,7 +184,6 @@ ENV ODOO_CMD=${ODOO_BASEPATH}/odoo-bin
 
 RUN mkdir -p ${ODOO_DATA_DIR} ${ODOO_LOGS_DIR} ${ODOO_EXTRA_ADDONS} /etc/odoo/
 
-# Own folders    //-- docker-compose creates named volumes owned by root:root. Issue: https://github.com/docker/compose/issues/3270
 RUN chown -R ${APP_UID}:${APP_GID} ${ODOO_DATA_DIR} ${ODOO_LOGS_DIR} ${ODOO_EXTRA_ADDONS} ${ODOO_BASEPATH} /etc/odoo
 
 VOLUME ["${ODOO_DATA_DIR}", "${ODOO_LOGS_DIR}", "${ODOO_EXTRA_ADDONS}"]
@@ -219,7 +197,6 @@ ENV EXTRA_MODULES=${EXTRA_MODULES}
 COPY --link --chown=${APP_UID}:${APP_GID} --from=builder /usr/local /usr/local
 COPY --link --chown=${APP_UID}:${APP_GID} --from=builder /opt/odoo ${ODOO_BASEPATH}
 
-# Copy from build env
 COPY --link --chown=${APP_UID}:${APP_GID} ./resources/entrypoint.sh /
 COPY --link --chown=${APP_UID}:${APP_GID} ./resources/getaddons.py /
 
