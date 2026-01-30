@@ -5,7 +5,9 @@ redis
 simplejson
 xlsxwriter
 xlrd
-fastapi
+
+fastapi==0.121.2
+starlette==0.49.3
 python-multipart
 ujson
 a2wsgi
@@ -27,3 +29,11 @@ PyMuPDF
 pdf2image
 plaid-python
 pysaml2
+python-json-logger 
+redis
+elastic-apm
+imgkit
+
+wrapt==2.0.1
+xmlschema==2.5.1
+elementpath==4.8.0

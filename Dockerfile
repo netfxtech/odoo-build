@@ -1,60 +1,86 @@
-FROM ubuntu:noble
-MAINTAINER Odoo S.A. <info@odoo.com>
+# syntax=docker/dockerfile:1
+# check=skip=UndefinedVar # We set the variables as a reference
+
+ARG PYTHON_VERSION=3.12-slim
+ARG OS_VARIANT=bookworm
+ARG ODOO_VERSION
+ARG WKHTMLTOX_VERSION=0.12.6.1-3
+ARG ODOO_USER=odoo
+ARG ODOO_BASEPATH=/opt/odoo
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+FROM python:${PYTHON_VERSION}-${OS_VARIANT} AS base
 
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
-# Generate locale C.UTF-8 for postgres and general locale data
-ENV LANG en_US.UTF-8
+USER root
 
-# Retrieve the target architecture to install the correct wkhtmltopdf package
-ARG TARGETARCH
+# Library versions
+ARG WKHTMLTOX_VERSION
+ENV WKHTMLTOX_VERSION=${WKHTMLTOX_VERSION}
 
-# Install some deps, lessc and less-plugin-clean-css, and wkhtmltopdf
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        dirmngr \
-        fonts-noto-cjk \
-        git \
-        gnupg \
-        libssl-dev \
-        node-less \
-        npm \
-        python3-lxml \
-        python3-magic \
-        python3-num2words \
-        python3-odf \
-        python3-pdfminer \
-        python3-pip \
-        python3-phonenumbers \
-        python3-pyldap \
-        python3-qrcode \
-        python3-renderpm \
-        python3-setuptools \
-        python3-slugify \
-        python3-vobject \
-        python3-watchdog \
-        python3-xlrd \
-        python3-xlwt \
-        xz-utils && \
-    if [ -z "${TARGETARCH}" ]; then \
-        TARGETARCH="$(dpkg --print-architecture)"; \
-    fi; \
-    WKHTMLTOPDF_ARCH=${TARGETARCH} && \
-    case ${TARGETARCH} in \
-    "amd64") WKHTMLTOPDF_ARCH=amd64 && WKHTMLTOPDF_SHA=967390a759707337b46d1c02452e2bb6b2dc6d59  ;; \
-    "arm64")  WKHTMLTOPDF_SHA=90f6e69896d51ef77339d3f3a20f8582bdf496cc  ;; \
-    "ppc64le" | "ppc64el") WKHTMLTOPDF_ARCH=ppc64el && WKHTMLTOPDF_SHA=5312d7d34a25b321282929df82e3574319aed25c  ;; \
-    esac \
-    && curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_${WKHTMLTOPDF_ARCH}.deb \
-    && echo ${WKHTMLTOPDF_SHA} wkhtmltox.deb | sha1sum -c - \
+# Use noninteractive to get rid of apt-utils message
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install odoo deps
+# hadolint ignore=DL3008
+RUN apt-get -qq update \
+    && apt-get -qq install -y --no-install-recommends \
+    # Odoo dependencies
+    ca-certificates \
+    curl \
+    dirmngr \
+    fonts-noto-cjk \
+    gnupg \
+    libssl-dev \
+    node-less \
+    npm \
+    # This uses a buggy version of libmagic
+    # python3-magic \
+    python3-num2words \
+    python3-odf \
+    python3-pdfminer \
+    python3-pip \
+    python3-phonenumbers \
+    python3-pyldap \
+    python3-qrcode \
+    python3-renderpm \
+    python3-setuptools \
+    python3-slugify \
+    python3-vobject \
+    python3-watchdog \
+    python3-xlrd \
+    python3-xlwt \
+    # Other dependencies
+    git-core \
+    htop \
+    ffmpeg \
+    fonts-liberation2 \
+    lsb-release \
+    nano \
+    ssh \
+    sudo \
+    unzip \
+    vim \
+    zip \
+    xz-utils \
+    xmlsec1 \
+    && \
+    if [ "$(uname -m)" = "aarch64" ]; then \
+        curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/packaging/releases/download/${WKHTMLTOX_VERSION}/wkhtmltox_${WKHTMLTOX_VERSION}.$(lsb_release -cs)_arm64.deb \
+    ; else \
+        curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/packaging/releases/download/${WKHTMLTOX_VERSION}/wkhtmltox_${WKHTMLTOX_VERSION}.$(lsb_release -cs)_amd64.deb \
+    ; fi \
     && apt-get install -y --no-install-recommends ./wkhtmltox.deb \
-    && rm -rf /var/lib/apt/lists/* wkhtmltox.deb
+    && apt-get autopurge -yqq \
+    && rm -rf /var/lib/apt/lists/* wkhtmltox.deb /tmp/*
 
 # install latest postgresql-client
-RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ noble-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
+RUN apt-get -qq update \
+    && apt-get -qq install -y --no-install-recommends \
+    lsb-release \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && GNUPGHOME="$(mktemp -d)" \
     && export GNUPGHOME \
     && repokey='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' \
@@ -62,67 +88,148 @@ RUN echo 'deb http://apt.postgresql.org/pub/repos/apt/ noble-pgdg main' > /etc/a
     && gpg --batch --armor --export "${repokey}" > /etc/apt/trusted.gpg.d/pgdg.gpg.asc \
     && gpgconf --kill all \
     && rm -rf "$GNUPGHOME" \
-    && apt-get update  \
-    && apt-get install --no-install-recommends -y postgresql-client \
+    && apt-get -qq install -y --no-install-recommends postgresql-client libpq-dev \
     && rm -f /etc/apt/sources.list.d/pgdg.list \
     && rm -rf /var/lib/apt/lists/*
 
 # Install rtlcss (on Debian buster)
-RUN npm install -g rtlcss
+RUN npm install -g rtlcss \
+    && rm -Rf ~/.npm /tmp/*
 
-# Install Odoo
-ENV ODOO_VERSION 19.0
-ARG ODOO_RELEASE=20250926
-RUN curl -o odoo.deb -sSL http://nightly.odoo.com/${ODOO_VERSION}/nightly/deb/odoo_${ODOO_VERSION}.${ODOO_RELEASE}_all.deb \
-    && apt-get update \
-    && apt-get -y install --no-install-recommends ./odoo.deb \
-    && rm -rf /var/lib/apt/lists/* odoo.deb
+FROM base AS builder
 
-RUN git clone --depth 1 -b ${ODOO_VERSION} https://git.netfxtech.cloud/odoo/enterprise \
-    /mnt/enterprise \
-    && rm -rf /mnt/enterprise/.git
+# Install hard & soft build dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    apt-utils dialog \
+    apt-transport-https \
+    build-essential \
+    libcairo2-dev \
+    libfreetype6-dev \
+    libfribidi-dev \
+    libghc-zlib-dev \
+    libharfbuzz-dev \
+    libjpeg-dev \
+    libgeoip-dev \
+    libmaxminddb-dev \
+    liblcms2-dev \
+    libldap2-dev \
+    libopenjp2-7-dev \
+    libsasl2-dev \
+    libtiff5-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    # Updated mimetype package to ensure consistent MIME type detection
+    libmagic1 \
+    libwebp-dev \
+    tcl-dev \
+    tk-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
-COPY ./requirements.txt /tmp/requirements.txt
+# Install Odoo source code and install it as a package inside the container with additional tools
+ARG ODOO_VERSION
 
-# Enable pip to manage system site-packages without --break-system-packages.
-RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED /usr/lib/python*/dist-packages/EXTERNALLY-MANAGED
+RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt \
+    && pip3 -qq install --prefix=/usr/local --no-cache-dir --upgrade \
+    rlpycairo \
+    'websocket-client~=0.56' \
+    astor \
+    black \
+    pylint-odoo \
+    flake8 \
+    pydevd-odoo \
+    psycogreen \
+    click-odoo-contrib \
+    git-aggregator \
+    inotify \
+    python-json-logger \
+    wdb \
+    redis \
+    && apt-get autopurge -yqq \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt --no-dependencies \
-    && rm /tmp/requirements.txt
 
-# Copy entrypoint script and Odoo configuration file
-COPY ./entrypoint.sh /
-COPY ./odoo.conf /etc/odoo/
+RUN git clone --depth 100 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
+    && pip3 install --editable /opt/odoo \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Set permissions and Mount /var/lib/odoo to allow restoring filestore and /mnt/extra-addons for users addons
-RUN chown odoo /etc/odoo/odoo.conf \
-    && mkdir -p /mnt/extra-addons \
-    && chown -R odoo /mnt/extra-addons
-VOLUME ["/var/lib/odoo/data", "/var/lib/odoo/logs", "/mnt/extra-addons"]
+RUN git clone --depth 100 -b 19.0 https://git.netfxtech.cloud/odoo/enterprise.git /opt/odoo/enterprise
 
-    # Create app user
-ENV ODOO_USER odoo
+ADD requirements.txt /tmp/requirements.txt
+RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement /tmp/requirements.txt \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
+
+RUN rm -rf /opt/odoo/.git /opt/odoo/enterprise/.git
+
+FROM base AS production
+
+# PIP auto-install requirements.txt (change value to "1" to auto-install)
+ENV PIP_AUTO_INSTALL=${PIP_AUTO_INSTALL:-"0"}
+
+# Run tests for all the modules in the custom addons
+ENV RUN_TESTS=${RUN_TESTS:-"0"}
+
+# Run tests for all installed modules
+ENV WITHOUT_TEST_TAGS=${WITHOUT_TEST_TAGS:-"0"}
+
+# Upgrade all databases visible to this Odoo instance
+ENV UPGRADE_ODOO=${UPGRADE_ODOO:-"0"}
+
+ARG ODOO_BASEPATH
+ENV ODOO_BASEPATH=${ODOO_BASEPATH}
+
+# Create app user
+ARG ODOO_USER
+ENV ODOO_USER=${ODOO_USER}
+
 ARG APP_UID
-ENV APP_UID ${APP_UID:-1000}
+ENV APP_UID=${APP_UID}
 
 ARG APP_GID
-ENV APP_GID ${APP_UID:-1000}
+ENV APP_GID=${APP_GID}
+
+RUN addgroup --system --gid ${APP_GID} ${ODOO_USER} \
+    && adduser --system --uid ${APP_UID} --ingroup ${ODOO_USER} --home ${ODOO_BASEPATH} --disabled-login --shell /bin/bash ${ODOO_USER} \
+    && echo ${ODOO_USER} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/${ODOO_USER}\
+    && chmod 0440 /etc/sudoers.d/${ODOO_USER}
+
+    
+# Define all needed directories
+ENV ODOO_RC=${ODOO_RC:-/etc/odoo/odoo.conf}
+ENV ODOO_DATA_DIR=${ODOO_DATA_DIR:-/var/lib/odoo/data}
+ENV ODOO_LOGS_DIR=${ODOO_LOGS_DIR:-/var/lib/odoo/logs}
+ENV ODOO_EXTRA_ADDONS=${ODOO_EXTRA_ADDONS:-/mnt/extra-addons}
+ENV ODOO_ADDONS_BASEPATH=${ODOO_BASEPATH}/addons
+ENV ODOO_CMD=${ODOO_BASEPATH}/odoo-bin
+
+RUN mkdir -p ${ODOO_DATA_DIR} ${ODOO_LOGS_DIR} ${ODOO_EXTRA_ADDONS} /etc/odoo/
+
+# Own folders    //-- docker-compose creates named volumes owned by root:root. Issue: https://github.com/docker/compose/issues/3270
+RUN chown -R ${APP_UID}:${APP_GID} ${ODOO_DATA_DIR} ${ODOO_LOGS_DIR} ${ODOO_EXTRA_ADDONS} ${ODOO_BASEPATH} /etc/odoo
+
+VOLUME ["${ODOO_DATA_DIR}", "${ODOO_LOGS_DIR}", "${ODOO_EXTRA_ADDONS}"]
+
+ARG EXTRA_ADDONS_PATHS
+ENV EXTRA_ADDONS_PATHS=${EXTRA_ADDONS_PATHS}
+
+ARG EXTRA_MODULES
+ENV EXTRA_MODULES=${EXTRA_MODULES}
+
+COPY --link --chown=${APP_UID}:${APP_GID} --from=builder /usr/local /usr/local
+COPY --link --chown=${APP_UID}:${APP_GID} --from=builder /opt/odoo ${ODOO_BASEPATH}
+
+# Copy from build env
+COPY --link --chown=${APP_UID}:${APP_GID} ./resources/entrypoint.sh /
+COPY --link --chown=${APP_UID}:${APP_GID} ./resources/getaddons.py /
 
 
-# RUN usermod -u ${APP_UID} ${ODOO_USER} \
-#     && groupmod -g ${APP_GID} ${ODOO_USER}
+RUN chmod u+x /entrypoint.sh
 
-# Expose Odoo services
 EXPOSE 8069 8071 8072
 
-# Set the default config file
-ENV ODOO_RC /etc/odoo/odoo.conf
-
-COPY wait-for-psql.py /usr/local/bin/wait-for-psql.py
-
-# Set default user when running the container
-USER odoo
-
-
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["odoo"]
+
+USER ${ODOO_USER}
+
+CMD ["/opt/odoo/odoo-bin"]
