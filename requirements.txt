@@ -37,3 +37,10 @@ imgkit
 wrapt==2.0.1
 xmlschema==2.5.1
 elementpath==4.8.0
+geoip2
+markdown2
+
+python-quickbooks==0.9.12
+pycountry==26.2.16 
+future
+python-json-logger
