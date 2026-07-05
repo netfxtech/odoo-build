@@ -134,11 +134,11 @@ RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement http
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 
-RUN git clone --depth 100 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
+RUN git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
     && pip3 install --editable /opt/odoo \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN git clone --depth 100 -b 19.0 https://git.netfxtech.cloud/odoo/enterprise.git /opt/odoo/enterprise
+RUN git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/enterprise.git /opt/odoo/enterprise
 
 ADD requirements.txt /tmp/requirements.txt
 RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement /tmp/requirements.txt \
