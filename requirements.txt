@@ -44,3 +44,7 @@ python-quickbooks==0.9.12
 pycountry==26.2.16 
 future
 python-json-logger
+
+sqlparse
+pandas
+anthropic
