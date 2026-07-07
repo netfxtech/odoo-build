@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ARG PYTHON_VERSION=3.12-slim
 ARG OS_VARIANT=bookworm
 ARG ODOO_VERSION
@@ -18,13 +19,31 @@ ENV WKHTMLTOX_VERSION=${WKHTMLTOX_VERSION}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get -qq update \
+# Base OS packages + PostgreSQL client + wkhtmltox, in a single layer.
+# apt cache mounts retain downloaded .debs and package lists across builds so a
+# clean rebuild doesn't re-download everything; removing docker-clean is what
+# makes the archive cache actually persist.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get -qq update \
     && apt-get -qq install -y --no-install-recommends \
     ca-certificates \
     curl \
     dirmngr \
-    fonts-noto-cjk \
     gnupg \
+    lsb-release \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && GNUPGHOME="$(mktemp -d)" \
+    && export GNUPGHOME \
+    && repokey='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' \
+    && gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "${repokey}" \
+    && gpg --batch --armor --export "${repokey}" > /etc/apt/trusted.gpg.d/pgdg.gpg.asc \
+    && gpgconf --kill all \
+    && rm -rf "$GNUPGHOME" \
+    && apt-get -qq update \
+    && apt-get -qq install -y --no-install-recommends \
+    fonts-noto-cjk \
     libssl-dev \
     node-less \
     npm \
@@ -46,7 +65,6 @@ RUN apt-get -qq update \
     htop \
     ffmpeg \
     fonts-liberation2 \
-    lsb-release \
     nano \
     ssh \
     sudo \
@@ -55,37 +73,27 @@ RUN apt-get -qq update \
     zip \
     xz-utils \
     xmlsec1 \
-    && \
-    if [ "$(uname -m)" = "aarch64" ]; then \
+    postgresql-client \
+    libpq-dev \
+    && if [ "$(uname -m)" = "aarch64" ]; then \
         curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/packaging/releases/download/${WKHTMLTOX_VERSION}/wkhtmltox_${WKHTMLTOX_VERSION}.$(lsb_release -cs)_arm64.deb \
     ; else \
         curl -o wkhtmltox.deb -sSL https://github.com/wkhtmltopdf/packaging/releases/download/${WKHTMLTOX_VERSION}/wkhtmltox_${WKHTMLTOX_VERSION}.$(lsb_release -cs)_amd64.deb \
     ; fi \
     && apt-get install -y --no-install-recommends ./wkhtmltox.deb \
     && apt-get autopurge -yqq \
-    && rm -rf /var/lib/apt/lists/* wkhtmltox.deb /tmp/*
-
-RUN apt-get -qq update \
-    && apt-get -qq install -y --no-install-recommends \
-    lsb-release \
-    && echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && GNUPGHOME="$(mktemp -d)" \
-    && export GNUPGHOME \
-    && repokey='B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8' \
-    && gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "${repokey}" \
-    && gpg --batch --armor --export "${repokey}" > /etc/apt/trusted.gpg.d/pgdg.gpg.asc \
-    && gpgconf --kill all \
-    && rm -rf "$GNUPGHOME" \
-    && apt-get -qq install -y --no-install-recommends postgresql-client libpq-dev \
-    && rm -f /etc/apt/sources.list.d/pgdg.list \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -f /etc/apt/sources.list.d/pgdg.list wkhtmltox.deb \
+    && rm -rf /tmp/*
 
 RUN npm install -g rtlcss \
     && rm -Rf ~/.npm /tmp/*
 
 FROM base AS builder
 
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
     apt-utils dialog \
     apt-transport-https \
@@ -110,12 +118,16 @@ RUN apt-get update \
     tcl-dev \
     tk-dev \
     zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /tmp/*
 
 ARG ODOO_VERSION
 
-RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt \
-    && pip3 -qq install --prefix=/usr/local --no-cache-dir --upgrade \
+# --mount=type=cache persists pip's wheel cache across builds so native wheels
+# (lxml, Pillow, pysaml2, PyMuPDF, python-Levenshtein, ...) aren't recompiled
+# every time this layer is rebuilt. Requires BuildKit (see syntax directive).
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --prefix=/usr/local --upgrade --requirement https://raw.githubusercontent.com/odoo/odoo/19.0/requirements.txt \
+    && pip3 -qq install --prefix=/usr/local --upgrade \
     rlpycairo \
     'websocket-client~=0.56' \
     astor \
@@ -133,18 +145,27 @@ RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement http
     && apt-get autopurge -yqq \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
+# Custom Python deps. Kept ABOVE the odoo clone: this file changes far less
+# often than the odoo fork, so backporting into odoo no longer re-runs it.
+ADD requirements.txt /tmp/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --prefix=/usr/local --upgrade --requirement /tmp/requirements.txt
 
-RUN git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
-    && pip3 install --editable /opt/odoo \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+# Cache-bust the clones without --no-cache: each ADD re-fetches the branch tip
+# on every build and only changes when HEAD moves, invalidating the clone layer
+# below exactly when (and only when) the source actually changed. So after a
+# backport, a plain `docker build` re-clones while apt/pip layers stay cached.
+# If your git host doesn't serve info/refs unauthenticated, replace the ADD with
+# an `ARG ODOO_REF` above the RUN and pass --build-arg ODOO_REF=<sha>.
+ADD https://git.netfxtech.cloud/odoo/odoo/info/refs?service=git-upload-pack /tmp/odoo-refs
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
+    && pip3 install --editable /opt/odoo
 
+ADD https://git.netfxtech.cloud/odoo/enterprise/info/refs?service=git-upload-pack /tmp/ent-refs
 RUN git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/enterprise.git /opt/odoo/enterprise
 
-ADD requirements.txt /tmp/requirements.txt
-RUN pip3 install --prefix=/usr/local --no-cache-dir --upgrade --requirement /tmp/requirements.txt \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
-
-RUN rm -rf /opt/odoo/.git /opt/odoo/enterprise/.git
+RUN rm -rf /opt/odoo/.git /opt/odoo/enterprise/.git /tmp/*
 
 FROM base AS production
 
