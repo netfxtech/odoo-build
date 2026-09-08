@@ -157,6 +157,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # backport, a plain `docker build` re-clones while apt/pip layers stay cached.
 # If your git host doesn't serve info/refs unauthenticated, replace the ADD with
 # an `ARG ODOO_REF` above the RUN and pass --build-arg ODOO_REF=<sha>.
+ADD https://git.netfxtech.cloud/odoo/odoo/info/refs?service=git-upload-pack /tmp/odoo-refs
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 -b 19.0 https://git.netfxtech.cloud/odoo/odoo.git /opt/odoo \
+    && pip3 install --editable /opt/odoo
+
 ARG ENTERPRISE_REF=19.0
 
 RUN --mount=type=secret,id=gitlab_netrc,target=/root/.netrc,required=true \

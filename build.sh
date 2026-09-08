@@ -9,6 +9,10 @@
 # content, and hands it to buildx through an environment variable — the
 # credential never touches the filesystem and never enters the build context.
 #
+# If $HOME/.config/bws/gitlab.netrc exists (export GITLAB_NETRC=<pat>), it is
+# used instead and Bitwarden is skipped entirely. Override the path with
+# GITLAB_NETRC_FILE.
+#
 #   ./build.sh                       # build :production with defaults
 #   ./build.sh --target builder      # stop at the builder stage
 #   ./build.sh --tag odoo:test       # custom tag
@@ -23,6 +27,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BWS_SECRET_KEY="${BWS_SECRET_KEY:-GITLAB_NETRC}"   # read-only repo scope
 BWS_SECRET_ID="${BWS_SECRET_ID:-}"                 # set to skip the key lookup
 TOKEN_ENV_FILE="${TOKEN_ENV_FILE:-$HOME/.config/bws/token.env}"
+GITLAB_NETRC_FILE="${GITLAB_NETRC_FILE:-$HOME/.config/bws/gitlab.netrc}"  # local override, skips Bitwarden entirely
 GIT_HOST="${GIT_HOST:-git.netfxtech.cloud}"
 GIT_LOGIN="${GIT_LOGIN:-oauth2}"
 IMAGE_TAG="${IMAGE_TAG:-odoo-build:19.0}"
@@ -52,32 +57,43 @@ while [ $# -gt 0 ]; do
 done
 
 # --- preflight ---------------------------------------------------------------
-command -v bws >/dev/null || die "bws not found on PATH"
-command -v jq  >/dev/null || die "jq not found on PATH"
 [ -f "$SCRIPT_DIR/Dockerfile" ] || die "no Dockerfile in $SCRIPT_DIR"
 
-# Load the BWS access token if it isn't already exported (e.g. non-interactive
-# shells and CI, which never source ~/.bashrc).
-if [ -z "${BWS_ACCESS_TOKEN:-}" ] && [ -r "$TOKEN_ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$TOKEN_ENV_FILE"
-fi
-[ -n "${BWS_ACCESS_TOKEN:-}" ] || die "BWS_ACCESS_TOKEN not set and $TOKEN_ENV_FILE unreadable"
-export BWS_ACCESS_TOKEN
-
 # --- resolve the secret ------------------------------------------------------
-if [ -z "$BWS_SECRET_ID" ]; then
-  info "resolving secret '$BWS_SECRET_KEY' in Bitwarden"
-  BWS_SECRET_ID="$(
-    bws secret list -o json \
-      | jq -r --arg k "$BWS_SECRET_KEY" '[.[] | select(.key == $k)] | .[0].id // empty'
-  )" || die "bws secret list failed (bad token, or vault unreachable?)"
-  [ -n "$BWS_SECRET_ID" ] || die "no secret named '$BWS_SECRET_KEY' visible to this machine account"
-fi
+if [ -r "$GITLAB_NETRC_FILE" ]; then
+  # Local override — skips Bitwarden entirely. Expects the file to export
+  # GITLAB_NETRC with the raw GitLab PAT.
+  info "using local override at $GITLAB_NETRC_FILE (skipping Bitwarden)"
+  # shellcheck disable=SC1090
+  . "$GITLAB_NETRC_FILE"
+  GITLAB_PAT="${GITLAB_NETRC:-}"
+  [ -n "$GITLAB_PAT" ] || die "$GITLAB_NETRC_FILE did not set GITLAB_NETRC"
+else
+  command -v bws >/dev/null || die "bws not found on PATH"
+  command -v jq  >/dev/null || die "jq not found on PATH"
 
-GITLAB_PAT="$(bws secret get "$BWS_SECRET_ID" -o json | jq -r '.value // empty')" \
-  || die "failed to read secret $BWS_SECRET_ID"
-[ -n "$GITLAB_PAT" ] || die "secret '$BWS_SECRET_KEY' is empty"
+  # Load the BWS access token if it isn't already exported (e.g. non-interactive
+  # shells and CI, which never source ~/.bashrc).
+  if [ -z "${BWS_ACCESS_TOKEN:-}" ] && [ -r "$TOKEN_ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$TOKEN_ENV_FILE"
+  fi
+  [ -n "${BWS_ACCESS_TOKEN:-}" ] || die "BWS_ACCESS_TOKEN not set and $TOKEN_ENV_FILE unreadable"
+  export BWS_ACCESS_TOKEN
+
+  if [ -z "$BWS_SECRET_ID" ]; then
+    info "resolving secret '$BWS_SECRET_KEY' in Bitwarden"
+    BWS_SECRET_ID="$(
+      bws secret list -o json \
+        | jq -r --arg k "$BWS_SECRET_KEY" '[.[] | select(.key == $k)] | .[0].id // empty'
+    )" || die "bws secret list failed (bad token, or vault unreachable?)"
+    [ -n "$BWS_SECRET_ID" ] || die "no secret named '$BWS_SECRET_KEY' visible to this machine account"
+  fi
+
+  GITLAB_PAT="$(bws secret get "$BWS_SECRET_ID" -o json | jq -r '.value // empty')" \
+    || die "failed to read secret $BWS_SECRET_ID"
+  [ -n "$GITLAB_PAT" ] || die "secret '$BWS_SECRET_KEY' is empty"
+fi
 
 case "$GITLAB_PAT" in
   glpat-*) ;;

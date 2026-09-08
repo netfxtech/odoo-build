@@ -48,3 +48,10 @@ python-json-logger
 sqlparse
 pandas
 anthropic
+pikepdf
+
+authlib>=1.6.12,<1.7.0
+defusedxml
+packaging
+posthog
+pycryptodome
