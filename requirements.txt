@@ -55,3 +55,9 @@ defusedxml
 packaging
 posthog
 pycryptodome
+
+# Optional CAD preview dependencies; install in the Odoo Python environment.
+# STL uses the standard library. DWG uses local LibreDWG (dwg2dxf), installed by Dockerfile.
+# A remote ODA converter remains optional for drawings needing it.
+ezdxf==1.4.4
+cadquery==2.8.0

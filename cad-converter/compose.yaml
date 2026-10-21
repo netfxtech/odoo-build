@@ -1,0 +1,26 @@
+services:
+  cad-converter:
+    platform: linux/amd64
+    build:
+      context: .
+    image: tap/cad-converter:oda-27.9
+    restart: unless-stopped
+    init: true
+    environment:
+      CAD_CONVERTER_TOKEN: ${CAD_CONVERTER_TOKEN:?Set a random shared token in .env}
+    # Bind to a private interface before allowing the ARM Odoo host to connect.
+    # The default is local access only.
+    ports:
+      - "${CAD_BIND_ADDRESS:-127.0.0.1}:8090:8090"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 128
+    ulimits:
+      fsize: 33554432
