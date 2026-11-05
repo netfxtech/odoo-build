@@ -258,7 +258,7 @@ COPY --link --chown=${APP_UID}:${APP_GID} ./resources/entrypoint.sh /
 COPY --link --chown=${APP_UID}:${APP_GID} ./resources/getaddons.py /
 
 
-RUN chmod u+x /entrypoint.sh
+RUN chmod u+x /entrypoint.sh ${ODOO_BASEPATH}/odoo-bin
 
 EXPOSE 8069 8071 8072
 
